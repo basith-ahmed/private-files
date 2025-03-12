@@ -420,13 +420,16 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white py-8">
-      <div className="container mx-auto px-4 max-w-6xl">
-        <div className="bg-white rounded-xl shadow-md overflow-hidden border border-gray-200">
+    <main className="min-h-screen bg-white">
+      <div>
+        <div className="min-h-screen">
           {/* Header */}
           <div className="bg-black p-6 text-white">
-            <h1 className="text-2xl font-bold">Cloud File Storage</h1>
-            <p className="text-gray-300 mt-1">Manage your files and folders with ease</p>
+            <h1 className="text-2xl font-bold">Cloud Private File Storage</h1>
+            <p className="text-gray-300 mt-1">
+              You deploy it, so no one is gonna delete your files without notice
+              :')
+            </p>
           </div>
 
           {/* Breadcrumb Navigation */}
@@ -436,7 +439,11 @@ export default function Home() {
               size="sm"
               onClick={() => navigateToBreadcrumb(-1)}
               disabled={!currentPath}
-              className={`rounded-full ${!currentPath ? "opacity-50" : "hover:bg-gray-100 hover:text-black"}`}
+              className={`rounded-full ${
+                !currentPath
+                  ? "opacity-50"
+                  : "hover:bg-gray-100 hover:text-black"
+              }`}
             >
               <ArrowLeft className="h-4 w-4 mr-1" />
               Root
@@ -472,14 +479,14 @@ export default function Home() {
             <div className="flex flex-wrap gap-3">
               <Button
                 onClick={() => setNewFolderDialog(true)}
-                className="bg-black hover:bg-gray-800 text-white transition-all duration-200"
+                className="bg-black hover:bg-[#1f1f1f] text-white transition-all duration-200"
               >
                 <FolderPlus className="h-4 w-4 mr-2" />
                 New Folder
               </Button>
 
               <div className="relative">
-                <Button className="bg-gray-900 hover:bg-gray-800 text-white transition-all duration-200">
+                <Button className="bg-black hover:bg-[#1f1f1f] text-white transition-all duration-200">
                   <Upload className="h-4 w-4 mr-2" />
                   Upload Files
                   <Input
@@ -492,7 +499,7 @@ export default function Home() {
               </div>
 
               <div className="relative">
-                <Button className="bg-gray-800 hover:bg-gray-700 text-white transition-all duration-200">
+                <Button className="bg-black hover:bg-[#1f1f1f] text-white transition-all duration-200">
                   <Folder className="h-4 w-4 mr-2" />
                   Upload Folder
                   <Input
@@ -520,19 +527,22 @@ export default function Home() {
           </div>
 
           {/* File/Folder List */}
-          <div className="p-6">
+          <div className="p-6 h-full">
             {loading ? (
               <div className="flex items-center justify-center p-12">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black"></div>
               </div>
             ) : items.length === 0 ? (
-              <div className="text-center py-12 px-4">
+              <div className="text-center py-12 px-4 h-full flex flex-col justify-center items-center">
                 <div className="bg-gray-50 inline-flex rounded-full p-4 mb-4">
                   <Folder className="h-8 w-8 text-gray-400" />
                 </div>
-                <h3 className="text-lg font-medium text-gray-800 mb-1">No files or folders</h3>
+                <h3 className="text-lg font-medium text-gray-800 mb-1">
+                  No files or folders
+                </h3>
                 <p className="text-gray-500 max-w-md mx-auto">
-                  Upload files or create a new folder to get started with your cloud storage.
+                  Upload files or create a new folder to get started with your
+                  cloud storage.
                 </p>
               </div>
             ) : (
@@ -542,7 +552,11 @@ export default function Home() {
                     key={index}
                     className="group border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 hover:border-gray-300 bg-white"
                   >
-                    <div className={`p-4 flex items-start ${item.isFolder ? "bg-gray-50" : "bg-white"}`}>
+                    <div
+                      className={`p-4 flex items-start ${
+                        item.isFolder ? "bg-gray-50" : "bg-white"
+                      }`}
+                    >
                       {item.isFolder ? (
                         <Folder className="h-10 w-10 text-gray-700 mr-3 mt-1" />
                       ) : (
@@ -567,19 +581,28 @@ export default function Home() {
                             {item.name}
                           </a>
                         )}
-                        <p className="text-sm text-gray-500 mt-1">{item.isFolder ? "Folder" : "File"}</p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          {item.isFolder ? "Folder" : "File"}
+                        </p>
                       </div>
                     </div>
 
                     <div className="px-4 py-2 border-t border-gray-100 bg-white flex justify-end">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full hover:bg-gray-100">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 rounded-full hover:bg-gray-100"
+                          >
                             <MoreVertical className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40">
-                          <DropdownMenuItem onClick={() => handleRename(item)} className="cursor-pointer">
+                          <DropdownMenuItem
+                            onClick={() => handleRename(item)}
+                            className="cursor-pointer"
+                          >
                             Rename
                           </DropdownMenuItem>
                           <DropdownMenuItem
@@ -617,7 +640,10 @@ export default function Home() {
             <Button variant="outline" onClick={() => setNewFolderDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleCreateFolder} className="bg-black hover:bg-gray-800 text-white">
+            <Button
+              onClick={handleCreateFolder}
+              className="bg-black hover:bg-[#1f1f1f] text-white"
+            >
               Create
             </Button>
           </DialogFooter>
@@ -628,7 +654,9 @@ export default function Home() {
       <Dialog open={renameDialog} onOpenChange={setRenameDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Rename {renameItem?.isFolder ? "Folder" : "File"}</DialogTitle>
+            <DialogTitle>
+              Rename {renameItem?.isFolder ? "Folder" : "File"}
+            </DialogTitle>
           </DialogHeader>
           <div className="py-4">
             <Input
@@ -642,13 +670,16 @@ export default function Home() {
             <Button variant="outline" onClick={() => setRenameDialog(false)}>
               Cancel
             </Button>
-            <Button onClick={performRename} className="bg-black hover:bg-gray-800 text-white">
+            <Button
+              onClick={performRename}
+              className="bg-black hover:bg-gray-800 text-white"
+            >
               Rename
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </main>
-  )
+  );
 }
 
