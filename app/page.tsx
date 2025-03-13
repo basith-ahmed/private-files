@@ -3,16 +3,6 @@
 import type React from "react";
 
 import { useState, useEffect } from "react";
-import { initializeApp } from "firebase/app";
-import {
-  getStorage,
-  ref,
-  listAll,
-  uploadBytes,
-  deleteObject,
-  getDownloadURL,
-  uploadBytesResumable,
-} from "firebase/storage";
 import {
   Folder,
   File,
@@ -46,7 +36,9 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { toast } from "@/hooks/use-toast";
 
-import { storage } from "@/lib/firebase";
+import { createClient } from "@/lib/supabase";
+
+const supabase = createClient();
 
 type FileItem = {
   name: string;
@@ -58,397 +50,372 @@ type FileItem = {
 };
 
 export default function Home() {
-  const [currentPath, setCurrentPath] = useState("");
-  const [items, setItems] = useState<FileItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [newFolderDialog, setNewFolderDialog] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
-  const [renameDialog, setRenameDialog] = useState(false);
-  const [renameItem, setRenameItem] = useState<FileItem | null>(null);
-  const [newName, setNewName] = useState("");
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [isUploading, setIsUploading] = useState(false);
-  const [pathSegments, setPathSegments] = useState<string[]>([]);
 
-  // Load files and folders
-  useEffect(() => {
-    loadItems();
-    updatePathSegments();
-  }, [currentPath]);
+const [currentPath, setCurrentPath] = useState("");
+const [items, setItems] = useState<FileItem[]>([]);
+const [loading, setLoading] = useState(true);
+const [newFolderDialog, setNewFolderDialog] = useState(false);
+const [newFolderName, setNewFolderName] = useState("");
+const [renameDialog, setRenameDialog] = useState(false);
+const [renameItem, setRenameItem] = useState<FileItem | null>(null);
+const [newName, setNewName] = useState("");
+const [pathSegments, setPathSegments] = useState<string[]>([]);
 
-  const updatePathSegments = () => {
-    if (currentPath === "") {
-      setPathSegments([]);
-      return;
-    }
+useEffect(() => {
+  loadItems();
+  updatePathSegments();
+}, [currentPath]);
 
-    const segments = currentPath.split("/");
-    setPathSegments(segments);
-  };
+const updatePathSegments = () => {
+  setPathSegments(currentPath.split("/").filter((p) => p));
+};
 
-  const loadItems = async () => {
-    setLoading(true);
-    try {
-      const storageRef = ref(storage, currentPath);
-      const result = await listAll(storageRef);
-
-      const folderPaths = new Set<string>();
-
-      // Get immediate folders
-      result.prefixes.forEach((folderRef) => {
-        const pathParts = folderRef.fullPath.split("/");
-        const folderName = pathParts[pathParts.length - 1];
-        folderPaths.add(folderName);
+const loadItems = async () => {
+  setLoading(true);
+  try {
+    const { data, error } = await supabase.storage
+      .from("private files")
+      .list(currentPath, {
+        limit: 100,
+        sortBy: { column: "name", order: "asc" },
       });
 
-      // Convert to folder items
-      const folderItems: FileItem[] = Array.from(folderPaths).map(
-        (folderName) => ({
-          name: folderName,
-          fullPath: currentPath ? `${currentPath}/${folderName}` : folderName,
-          isFolder: true,
-        })
-      );
+    if (error) throw error;
 
-      // Get file details
-      const filePromises = result.items.map(async (itemRef) => {
-        const pathParts = itemRef.fullPath.split("/");
-        const fileName = pathParts[pathParts.length - 1];
-        const downloadURL = await getDownloadURL(itemRef);
+    const folderPaths = new Set<string>();
+    const fileItems: FileItem[] = [];
 
-        return {
-          name: fileName,
-          fullPath: itemRef.fullPath,
+    for (const item of data) {
+      const parts = item.name.split("/");
+
+      // Detect folders using .folder marker
+      if (parts.length === 2 && parts[1] === ".folder") {
+        folderPaths.add(parts[0]);
+        continue;
+      }
+
+      // Detect files
+      if (!item.name.includes("/")) {
+        const fullPath = currentPath
+          ? `${currentPath}/${item.name}`
+          : item.name;
+        const { data: urlData } = supabase.storage
+          .from("private files")
+          .getPublicUrl(fullPath);
+
+        fileItems.push({
+          name: item.name,
+          fullPath,
           isFolder: false,
-          downloadURL,
-        };
-      });
-
-      const fileItems = await Promise.all(filePromises);
-
-      // Combine and sort (folders first, then files)
-      setItems([
-        ...folderItems.sort((a, b) => a.name.localeCompare(b.name)),
-        ...fileItems.sort((a, b) => a.name.localeCompare(b.name)),
-      ]);
-    } catch (error) {
-      console.error("Error loading items:", error);
-      toast({
-        title: "Error",
-        description: "Failed to load files and folders",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateFolder = async () => {
-    if (!newFolderName.trim()) {
-      toast({
-        title: "Error",
-        description: "Folder name cannot be empty",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      // Create an empty file to represent the folder
-      const folderPath = currentPath
-        ? `${currentPath}/${newFolderName}/.folder`
-        : `${newFolderName}/.folder`;
-
-      const folderRef = ref(storage, folderPath);
-      await uploadBytes(folderRef, new Uint8Array(0));
-
-      setNewFolderDialog(false);
-      setNewFolderName("");
-      loadItems();
-
-      toast({
-        title: "Success",
-        description: `Folder "${newFolderName}" created successfully`,
-      });
-    } catch (error) {
-      console.error("Error creating folder:", error);
-      toast({
-        title: "Error",
-        description: "Failed to create folder",
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleFileUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    setIsUploading(true);
-    setUploadProgress(0);
-
-    try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const filePath = currentPath
-          ? `${currentPath}/${file.name}`
-          : file.name;
-        const fileRef = ref(storage, filePath);
-
-        const uploadTask = uploadBytesResumable(fileRef, file);
-
-        uploadTask.on(
-          "state_changed",
-          (snapshot) => {
-            const progress =
-              (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            setUploadProgress(progress);
-          },
-          (error) => {
-            console.error("Upload error:", error);
-            toast({
-              title: "Error",
-              description: `Failed to upload ${file.name}`,
-              variant: "destructive",
-            });
-          }
-        );
-
-        await uploadTask;
+          downloadURL: urlData.publicUrl,
+        });
       }
-
-      toast({
-        title: "Success",
-        description: `${files.length} file(s) uploaded successfully`,
-      });
-
-      loadItems();
-    } catch (error) {
-      console.error("Error uploading files:", error);
-      toast({
-        title: "Error",
-        description: "Failed to upload files",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploading(false);
-      // Reset the input
-      event.target.value = "";
-    }
-  };
-
-  const handleFolderUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    setIsUploading(true);
-    setUploadProgress(0);
-
-    try {
-      const totalFiles = files.length;
-      let uploadedFiles = 0;
-
-      for (let i = 0; i < totalFiles; i++) {
-        const file = files[i];
-        // webkitRelativePath contains the relative path of the file in the folder
-        const relativePath = file.webkitRelativePath;
-        const uploadPath = currentPath
-          ? `${currentPath}/${relativePath}`
-          : relativePath;
-
-        const fileRef = ref(storage, uploadPath);
-
-        const uploadTask = uploadBytesResumable(fileRef, file);
-
-        uploadTask.on(
-          "state_changed",
-          (snapshot) => {
-            const fileProgress =
-              snapshot.bytesTransferred / snapshot.totalBytes;
-            const overallProgress =
-              ((uploadedFiles + fileProgress) / totalFiles) * 100;
-            setUploadProgress(overallProgress);
-          },
-          (error) => {
-            console.error("Upload error:", error);
-          }
-        );
-
-        await uploadTask;
-        uploadedFiles++;
-      }
-
-      toast({
-        title: "Success",
-        description: `Folder uploaded successfully with ${totalFiles} files`,
-      });
-
-      loadItems();
-    } catch (error) {
-      console.error("Error uploading folder:", error);
-      toast({
-        title: "Error",
-        description: "Failed to upload folder",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploading(false);
-      // Reset the input
-      event.target.value = "";
-    }
-  };
-
-  const handleDelete = async (item: FileItem) => {
-    try {
-      if (item.isFolder) {
-        // For folders, we need to recursively delete all contents
-        await deleteFolder(item.fullPath);
-      } else {
-        // For files, we can delete directly
-        const fileRef = ref(storage, item.fullPath);
-        await deleteObject(fileRef);
-      }
-
-      toast({
-        title: "Success",
-        description: `${item.name} deleted successfully`,
-      });
-
-      loadItems();
-    } catch (error) {
-      console.error("Error deleting item:", error);
-      toast({
-        title: "Error",
-        description: `Failed to delete ${item.name}`,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const deleteFolder = async (folderPath: string) => {
-    const folderRef = ref(storage, folderPath);
-    const result = await listAll(folderRef);
-
-    // Delete all files in the folder
-    const fileDeletePromises = result.items.map((fileRef) =>
-      deleteObject(fileRef)
-    );
-    await Promise.all(fileDeletePromises);
-
-    // Recursively delete all subfolders
-    const folderDeletePromises = result.prefixes.map((subFolderRef) =>
-      deleteFolder(subFolderRef.fullPath)
-    );
-    await Promise.all(folderDeletePromises);
-  };
-
-  const handleRename = (item: FileItem) => {
-    setRenameItem(item);
-    setNewName(item.name);
-    setRenameDialog(true);
-  };
-
-  const performRename = async () => {
-    if (!renameItem || !newName.trim()) {
-      toast({
-        title: "Error",
-        description: "New name cannot be empty",
-        variant: "destructive",
-      });
-      return;
     }
 
-    try {
-      const oldPath = renameItem.fullPath;
-      const pathParts = oldPath.split("/");
-      pathParts.pop(); // Remove the old name
-      const newPath = [...pathParts, newName].join("/");
+    const folderItems = Array.from(folderPaths).map((name) => ({
+      name,
+      fullPath: currentPath ? `${currentPath}/${name}` : name,
+      isFolder: true,
+    }));
 
-      if (renameItem.isFolder) {
-        // For folders, we need to copy all contents to new location and delete old ones
-        await copyFolderContents(oldPath, newPath);
-        await deleteFolder(oldPath);
-      } else {
-        // For files, download and reupload with new name
-        const oldRef = ref(storage, oldPath);
-        const newRef = ref(storage, newPath);
+    setItems([
+      ...folderItems.sort((a, b) => a.name.localeCompare(b.name)),
+      ...fileItems.sort((a, b) => a.name.localeCompare(b.name)),
+    ]);
+  } catch (error) {
+    console.error("Error loading items:", error);
+    toast({
+      title: "Error",
+      description: "Failed to load files and folders",
+      variant: "destructive",
+    });
+  } finally {
+    setLoading(false);
+  }
+};
 
-        const url = await getDownloadURL(oldRef);
-        const response = await fetch(url);
-        const blob = await response.blob();
+const handleCreateFolder = async () => {
+  if (!newFolderName.trim()) {
+    toast({
+      title: "Error",
+      description: "Folder name cannot be empty",
+      variant: "destructive",
+    });
+    return;
+  }
 
-        await uploadBytes(newRef, blob);
-        await deleteObject(oldRef);
-      }
+  try {
+    const folderPath = currentPath
+      ? `${currentPath}/${newFolderName}/.folder`
+      : `${newFolderName}/.folder`;
 
-      setRenameDialog(false);
-      loadItems();
+    const { error } = await supabase.storage
+      .from("private files")
+      .upload(folderPath, new Blob([]));
 
-      toast({
-        title: "Success",
-        description: `Renamed successfully to ${newName}`,
-      });
-    } catch (error) {
-      console.error("Error renaming:", error);
-      toast({
-        title: "Error",
-        description: "Failed to rename item",
-        variant: "destructive",
-      });
-    }
-  };
+    if (error) throw error;
 
-  const copyFolderContents = async (sourcePath: string, destPath: string) => {
-    const sourceRef = ref(storage, sourcePath);
-    const result = await listAll(sourceRef);
+    loadItems();
+    setNewFolderDialog(false);
+    setNewFolderName("");
+    toast({
+      title: "Success",
+      description: `Folder "${newFolderName}" created successfully`,
+    });
+  } catch (error) {
+    console.error("Error creating folder:", error);
+    toast({
+      title: "Error",
+      description: "Failed to create folder",
+      variant: "destructive",
+    });
+  }
+};
 
-    // Copy all files
-    for (const fileRef of result.items) {
-      const fileName = fileRef.name;
-      const newFilePath = `${destPath}/${fileName}`;
-      const newFileRef = ref(storage, newFilePath);
+const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
 
-      const url = await getDownloadURL(fileRef);
-      const response = await fetch(url);
-      const blob = await response.blob();
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const filePath = currentPath ? `${currentPath}/${file.name}` : file.name;
 
-      await uploadBytes(newFileRef, blob);
-    }
+      const { error } = await supabase.storage
+        .from("private files")
+        .upload(filePath, file);
 
-    // Recursively copy all subfolders
-    for (const folderRef of result.prefixes) {
-      const folderName = folderRef.name;
-      const newFolderPath = `${destPath}/${folderName}`;
-      await copyFolderContents(folderRef.fullPath, newFolderPath);
-    }
-  };
-
-  const navigateToFolder = (folderPath: string) => {
-    setCurrentPath(folderPath);
-  };
-
-  const navigateUp = () => {
-    if (!currentPath) return;
-
-    const pathParts = currentPath.split("/");
-    pathParts.pop();
-    const newPath = pathParts.join("/");
-    setCurrentPath(newPath);
-  };
-
-  const navigateToBreadcrumb = (index: number) => {
-    if (index === -1) {
-      setCurrentPath("");
-      return;
+      if (error) throw error;
     }
 
-    const newPath = pathSegments.slice(0, index + 1).join("/");
-    setCurrentPath(newPath);
-  };
+    toast({
+      title: "Success",
+      description: `${files.length} file(s) uploaded successfully`,
+    });
+    loadItems();
+  } catch (error) {
+    console.error("Error uploading files:", error);
+    toast({
+      title: "Error",
+      description: "Failed to upload files",
+      variant: "destructive",
+    });
+  } finally {
+    event.target.value = "";
+  }
+};
+
+const handleFolderUpload = async (
+  event: React.ChangeEvent<HTMLInputElement>
+) => {
+  const files = event.target.files;
+  if (!files || files.length === 0) return;
+
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const relativePath = file.webkitRelativePath;
+      const uploadPath = currentPath
+        ? `${currentPath}/${relativePath}`
+        : relativePath;
+
+      const { error } = await supabase.storage
+        .from("private files")
+        .upload(uploadPath, file);
+
+      if (error) throw error;
+    }
+
+    toast({
+      title: "Success",
+      description: `Folder uploaded successfully with ${files.length} files`,
+    });
+    loadItems();
+  } catch (error) {
+    console.error("Error uploading folder:", error);
+    toast({
+      title: "Error",
+      description: "Failed to upload folder",
+      variant: "destructive",
+    });
+  } finally {
+    event.target.value = "";
+  }
+};
+
+const deleteFolder = async (folderPath: string) => {
+  try {
+    // Delete all files in folder and subfolders
+    const { data: listData, error: listError } = await supabase.storage
+      .from("private files")
+      .list(folderPath);
+
+    if (listError) throw listError;
+
+    const filesToDelete = listData
+      .filter((item) => !item.name.endsWith("/"))
+      .map((item) => `${folderPath}/${item.name}`);
+
+    // Add folder marker file
+    filesToDelete.push(`${folderPath}/.folder`);
+
+    if (filesToDelete.length > 0) {
+      const { error: deleteError } = await supabase.storage
+        .from("private files")
+        .remove(filesToDelete);
+      if (deleteError) throw deleteError;
+    }
+
+    // Recursively delete subfolders
+    const subfolders = listData
+      .filter((item) => item.name.endsWith("/"))
+      .map((item) => `${folderPath}/${item.name.slice(0, -1)}`);
+
+    for (const subfolder of subfolders) {
+      await deleteFolder(subfolder);
+    }
+  } catch (error) {
+    throw error;
+  }
+};
+
+const handleDelete = async (item: FileItem) => {
+  try {
+    if (item.isFolder) {
+      await deleteFolder(item.fullPath);
+    } else {
+      const { error } = await supabase.storage
+        .from("private files")
+        .remove([item.fullPath]);
+      if (error) throw error;
+    }
+
+    toast({
+      title: "Success",
+      description: `${item.name} deleted successfully`,
+    });
+    loadItems();
+  } catch (error) {
+    console.error("Error deleting item:", error);
+    toast({
+      title: "Error",
+      description: `Failed to delete ${item.name}`,
+      variant: "destructive",
+    });
+  }
+};
+
+const handleRename = (item: FileItem) => {
+  setRenameItem(item);
+  setNewName(item.name);
+  setRenameDialog(true);
+};
+
+const copyFolderContents = async (sourcePath: string, destPath: string) => {
+  const { data: listData, error } = await supabase.storage
+    .from("private files")
+    .list(sourcePath);
+
+  if (error) throw error;
+
+  for (const item of listData) {
+    const oldPath = `${sourcePath}/${item.name}`;
+    const newPath = `${destPath}/${item.name}`;
+
+    if (item.name.endsWith("/")) {
+      await copyFolderContents(oldPath, newPath);
+    } else {
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from("private files")
+        .download(oldPath);
+      if (downloadError) throw downloadError;
+
+      const { error: uploadError } = await supabase.storage
+        .from("private files")
+        .upload(newPath, fileData);
+      if (uploadError) throw uploadError;
+    }
+  }
+
+  // Copy .folder marker
+  try {
+    const { data: markerData } = await supabase.storage
+      .from("private files")
+      .download(`${sourcePath}/.folder`);
+
+    if (markerData) {
+      await supabase.storage
+        .from("private files")
+        .upload(`${destPath}/.folder`, markerData);
+    }
+  } catch {}
+};
+
+const performRename = async () => {
+  if (!renameItem || !newName.trim()) {
+    toast({
+      title: "Error",
+      description: "New name cannot be empty",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  try {
+    const oldPath = renameItem.fullPath;
+    const newPath = oldPath.split("/").slice(0, -1).concat(newName).join("/");
+
+    if (renameItem.isFolder) {
+      await copyFolderContents(oldPath, newPath);
+      await deleteFolder(oldPath);
+    } else {
+      // Download and reupload file
+      const { data: fileData, error: downloadError } = await supabase.storage
+        .from("private files")
+        .download(oldPath);
+      if (downloadError) throw downloadError;
+
+      const { error: uploadError } = await supabase.storage
+        .from("private files")
+        .upload(newPath, fileData);
+      if (uploadError) throw uploadError;
+
+      const { error: deleteError } = await supabase.storage
+        .from("private files")
+        .remove([oldPath]);
+      if (deleteError) throw deleteError;
+    }
+
+    setRenameDialog(false);
+    loadItems();
+    toast({
+      title: "Success",
+      description: `Renamed successfully to ${newName}`,
+    });
+  } catch (error) {
+    console.error("Error renaming:", error);
+    toast({
+      title: "Error",
+      description: "Failed to rename item",
+      variant: "destructive",
+    });
+  }
+};
+
+const navigateToFolder = (folderPath: string) => {
+  setCurrentPath(folderPath);
+};
+
+const navigateUp = () => {
+  const pathParts = currentPath.split("/");
+  pathParts.pop();
+  setCurrentPath(pathParts.join("/"));
+};
+
+const navigateToBreadcrumb = (index: number) => {
+  const newPath = pathSegments.slice(0, index + 1).join("/");
+  setCurrentPath(newPath);
+};
 
   return (
     <main className="h-screen bg-white">
@@ -459,7 +426,7 @@ export default function Home() {
 
           {/* Header */}
           <div className="bg-black p-6 text-white">
-            <h1 className="text-xl font-bold">Cloud Private File Storage</h1>
+            <h1 className="text-xl font-bold">Cloud Private files File Storage</h1>
             <p className="text-sm text-gray-300 mt-1">
               You deploy it, so no one is gonna delete your files without notice
               :')
@@ -503,7 +470,7 @@ export default function Home() {
             </div>
 
             {/* Upload Progress */}
-            {isUploading && (
+            {/* {isUploading && (
               <div className="mt-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
                 <p className="text-sm mb-1 text-gray-800 font-medium flex items-center">
                   <Upload className="h-4 w-4 mr-2 animate-pulse" />
@@ -511,7 +478,7 @@ export default function Home() {
                 </p>
                 <Progress value={uploadProgress} className="h-2 bg-gray-100" />
               </div>
-            )}
+            )} */}
           </div>
         </section>
 
